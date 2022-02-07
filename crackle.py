@@ -1,4 +1,5 @@
 import json
+import string
 
 
 def argmax(xs):
@@ -7,22 +8,32 @@ def argmax(xs):
 def char_to_idx(c):
     return ord(c) - ord('a')
 
+def word_counts(word):
+    # Returns the count of each letter in the word
+    return [word.count(c) for c in string.ascii_lowercase]
+
 
 class WordState:
-    def __init__(self, greens, yellows, grays) -> None:
+    def __init__(self, greens, yellows, grays, known_not) -> None:
         self.greens = greens
         self.yellows = yellows
         self.grays = grays
+
+        self.known_not = known_not
     
     def word_valid(self, word):
         for i, green in enumerate(self.greens):
             if green != None and word[i] != green:
                 return False
-        for yellow in self.yellows:
-            if yellow not in word:
+        counts = word_counts(word)
+        for gray, limit in self.grays.items():
+            if counts[char_to_idx(gray)] >= limit:
                 return False
-        for gray in self.grays:
-            if gray in word:
+        for yellow, count in self.yellows.items():
+            if counts[char_to_idx(yellow)] < count:
+                return False
+        for i, c in enumerate(word):
+            if c in self.known_not[i]:
                 return False
         return True
 
@@ -34,25 +45,34 @@ class WordState:
     def __repr__(self) -> str:
         return f"{self.greens}"
 
-start_state = WordState([None, None, None, None, None], [], [])
+start_state = WordState([None, None, None, None, None], {c: 0 for c in string.ascii_lowercase}, {}, [{}, {}, {}, {}, {}])
 
 
 class Game:
     def __init__(self, word) -> None:
         self.word = word
+        wc = word_counts(word)
+        self.gold_counts = {c: wc[i] for i, c in enumerate(string.ascii_lowercase)}
 
     def guess(self, state, guess) -> WordState:
         new_greens = [c for c in state.greens]
-        new_yellows = [c for c in state.yellows]
-        new_grays = [c for c in state.grays]
+        new_grays = {c: v for c, v in state.grays.items()}
+        new_known_not = [{c for c in kn} for kn in state.known_not]
+
+        wc = word_counts(guess)
+        found_grays = {}
         for i, c in enumerate(guess):
-            if c in self.word:
-                new_yellows.append(c)
-            else:
-                new_grays.append(c)
             if c == self.word[i]:
                 new_greens[i] = c
-        return WordState(new_greens, new_yellows, new_grays)
+            elif c in self.word:
+                new_known_not[i].add(c)
+            if wc[char_to_idx(c)] > self.gold_counts[c]:
+                found_grays[c] = self.gold_counts[c] + 1
+        
+        new_yellows = {c: min(self.gold_counts[c], max(wc[char_to_idx(c)], state.yellows[c])) for c in string.ascii_lowercase}
+        for c in found_grays:
+            new_grays[c] = min(new_grays[c], found_grays[c]) if c in new_grays else found_grays[c]
+        return WordState(new_greens, new_yellows, new_grays, new_known_not)
             
 
 with open("dict.json") as infile:
@@ -82,16 +102,28 @@ def do_turn(game, state, words):
     return new_state, new_words, to_guess
 
 
-test_game = Game("aloft")
-# test_state = test_game.guess(start_state, "slick")
-# print(test_state)
-# filtered_words = test_state.filter_list(solutions)
-# print(filtered_words)
-# print(most_likely(filtered_words))
-cur_state = start_state
-cur_words = solutions
-for turn in range(6):
-    cur_state, cur_words, guessed = do_turn(test_game, cur_state, cur_words)
-    print(f"Turn {turn+1}: Guessed '{guessed}'. State: {cur_state}, Remaining: {cur_words}")
-    if len(cur_words) == 1:
-        break
+def play_game(goal_word, max_turns=6):
+    game = Game(goal_word)
+    cur_state = start_state
+    cur_words = solutions
+    for turn in range(max_turns):
+        cur_state, cur_words, guessed = do_turn(game, cur_state, cur_words)
+        # print(f"Turn {turn+1}: Guessed '{guessed}'. State: {cur_state}, Remaining: {cur_words}")
+        if guessed == goal_word:
+            print(f"Guessed {goal_word} in {turn+1} turns.")
+            return True, turn+1
+    print(f"Did not guess {goal_word}.")
+    return False, -1
+    
+
+guessed_turns = []
+not_guessed = []
+for word in solutions:
+    solved, turns = play_game(word)
+    if solved:
+        guessed_turns.append(turns)
+    else:
+        not_guessed.append(word)
+
+print(f"Average turns for solved: {sum(guessed_turns) / len(guessed_turns)}")
+print(f"Couldn't guess: {not_guessed}")
